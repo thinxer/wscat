@@ -1,21 +1,24 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
+	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
 
-	"github.com/mgutz/ansi"
+	"github.com/gorilla/websocket"
 
-	"golang.org/x/net/websocket"
+	"github.com/mgutz/ansi"
 )
 
 var (
 	flagPretty = flag.Bool("pretty", false, "Pretty print")
+	flagDebug  = flag.Bool("debug", false, "Print message type")
 )
 
 func main() {
@@ -25,16 +28,19 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	conn, err := websocket.Dial(u.String(), "", "http://"+u.Host)
+	h := http.Header{"Origin": {"http://" + u.Host}}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), h)
+
 	if err != nil {
 		panic(err)
 	}
 
 	go func() {
 		for {
-			var buf []byte
-			if err := websocket.Message.Receive(conn, &buf); err != nil {
-				return
+			t, buf, err := conn.ReadMessage()
+			if *flagDebug {
+				log.Println("type:", t, len(buf), err)
+				continue
 			}
 			if *flagPretty {
 				color := ansi.ColorCode("green")
@@ -56,6 +62,18 @@ func main() {
 			}
 		}
 	}()
-	io.Copy(conn, os.Stdin)
+
+	b := bufio.NewReader(os.Stdin)
+	for {
+		line, err := b.ReadString('\n')
+		if err != nil {
+			log.Println(err)
+			break
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+			break
+		}
+	}
+
 	conn.Close()
 }
